@@ -12,7 +12,8 @@ This repository contains R scripts used for the data analysis. It includes:
 1. Request the dataset from the [Afrobarometer website](https://www.afrobarometer.org/geocoded-data/).
 2. Clone the repository.
 3. Install the required R packages: `foreign`, `readr`, `readxl`, `tidyverse`, `broom`, `stringr`, `dplyr`, `skimr`, `officer`, `flextable`, `sf`, `sjlabelled`, `ggplot2`, `fixest`, `texreg`, `rnaturalearth`, `rnaturalearthdata`, `countrycode`.
-4. Run `geospatial-development-projects.Rmd` for the main results.
+4. Insert the appropriate pathways for ‘…’ in lines 48, 74, 100, 127, 131, 135, 140, 142, 145, 677, and 679.
+5. Run `geospatial-development-projects.Rmd` for the main results.
 
 ## Dataset
 - This study utilised two main sources: Afrobarometer Survey Data from rounds 4-6
