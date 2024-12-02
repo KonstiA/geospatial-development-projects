@@ -9,8 +9,9 @@ This repository contains R scripts used for the data analysis. It includes:
 - Robustness checks
 
 ## How to Use
-1. Clone the repository.
-2. Install the required R packages: `foreign`, `readr`, `readxl`, `tidyverse`, `broom`, `stringr`, `dplyr`, `skimr`, `officer`, `flextable`, `sf`, `sjlabelled`, `ggplot2`, `fixest`, `texreg`, `rnaturalearth`, `rnaturalearthdata`, `countrycode`.
+1. Request the dataset from the [Afrobarometer website](https://www.afrobarometer.org/geocoded-data/).
+2. Clone the repository.
+3. Install the required R packages: `foreign`, `readr`, `readxl`, `tidyverse`, `broom`, `stringr`, `dplyr`, `skimr`, `officer`, `flextable`, `sf`, `sjlabelled`, `ggplot2`, `fixest`, `texreg`, `rnaturalearth`, `rnaturalearthdata`, `countrycode`.
 4. Run `geospatial-development-projects.Rmd` for the main results.
 
 ## Dataset
