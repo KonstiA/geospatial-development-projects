@@ -17,8 +17,19 @@ This repository contains R scripts used for the data analysis. It includes:
 - Modular, reusable code.
 - Example of geospatial regression modeling and data visualization in R.
 
+## Dataset
+- This study utilised two main sources: Afrobarometer Survey Data from rounds 4-6
+(2008-2015), which includes approximately 74,000 respondents from 37 African
+countries, and AidData’s World Bank Geocoded Research Release (1995-2014),
+providing geo-coded data on project periods (AidData, 2017; BenYishay, 2017). A
+repeated cross-sectional dataset was created for this paper, focusing on 61,337
+respondents from 28 African countries and 701 World Bank projects between 2008
+and 2014.
+- The geospatial data used in this analysis cannot be shared here due to privacy concerns; however, it is available upon request on the official Afrobarometer [website]([url](https://www.afrobarometer.org/geocoded-data/)).
+
 # Thematic project Description
-Foreign Aid and Institutional Quality in Africa: Evidence from Afrobarometer and World Bank Project Data || A Geospatial Analysis of the Effects of World Bank Development Projects on Perceived Institutional Legitimacy.
+Foreign Aid and Institutional Quality in Africa: Evidence from Afrobarometer and World Bank Project Data
+A Geospatial Analysis of the Effects of World Bank Development Projects on Perceived Institutional Legitimacy.
 
 Abstract
 - This study analyses the impact of World Bank development projects on citizens' perceptions of institutional legitimacy and their sense of obligation to comply with key state institutions in Africa. Using location data from 28 African countries between 2008 and 2014 and a difference-in-difference-like analysis of a sample of approximately 61,000 citizens, it examines how these projects affect institutional legitimacy. Grounded in Legitimacy Theory, the results demonstrate that development projects generally enhance institutional legitimacy by improving procedural fairness and increasing institutional performance. However, the effects vary depending on the project themes, proximity to citizens and project status. For example, completed projects tend to strengthen the legitimacy of the police, while ongoing projects have a negative effect on the legitimacy of the courts. The study emphasises the complexity of the relationship between development projects and institutional legitimacy and highlights the need for nuanced approaches in policy and implementation.
