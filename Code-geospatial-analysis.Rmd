@@ -1,0 +1,1129 @@
+---
+title: "Foreign Aid and Institutional Quality in Africa: Evidence from Afrobarometer and World Bank Project Data | A Geospatial Analysis of the Effects of World Bank Development Projects on Perceived Institutional Legitimacy"
+author: "Konstantin A."
+date: "2024-08-18"
+output: html_document
+---
+
+---
+R Markdown shortcuts:
+New Chunk:      Option & Cmd & I
+Close chunks:   Option & Cmd & O
+Pipes %>% :     Shift  & Cmd & M
+Arrow "<-" :    Option & -
+"~" :           Option & N
+Multiple lines: hold Option
+---
+
+Set up
+
+```{r Setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r (Optionally) install and then load packages}
+library(foreign)
+library(readr)
+library(readxl)
+library(tidyverse)
+library(broom)
+library(stringr)
+library(dplyr)
+library(skimr)             # summary statistics
+library(officer)           # descriptive summary statistics
+library(flextable)         # descriptive summary statistics
+library(sf)                # spatial data package
+library(sjlabelled)        # label variables
+library(ggplot2)           # visualisations
+library(fixest)            # fixed effects regression
+library(texreg)            # regression output tables
+library(rnaturalearth)     # mapping
+library(rnaturalearthdata) # mapping
+library(countrycode)       # iso3 country code
+```
+
+```{r Load data}
+# Afrobarometer - Rounds
+## Round 4
+AB_r4 <- read.spss("...", to.data.frame = TRUE)
+AB_r4 <- AB_r4 %>% rename_with(~ str_to_lower(.)) %>% #rename all variables to lower case for compatibility with other data
+  rename(date = dateintr,
+         country.y = country,
+         urban = urbrur,
+         age = q1,
+         ethnic = q79,
+         employment = q94,
+         education = q89, 
+         religion = q90,
+         vote = q97,
+         gender = q101,
+         race = q102,
+         legitim_court = q44a,
+         legitim_police = q44b,
+         legitim_tax = q44c,
+         trust_president = q49a,
+         trust_parliament = q49b,
+         trust_election = q49c,
+         trust_local = q49d,
+         trust_government = q49e,
+         trust_opposition = q49f,
+         trust_police = q49g,
+         trust_court = q49h
+         )
+## Round 5
+AB_r5 <- read.spss("...", to.data.frame = TRUE)
+AB_r5 <- AB_r5 %>% rename_with(~ str_to_lower(.)) %>% 
+  rename(date = dateintr,
+         country.y = country,
+         urban = urbrur,
+         age = q1,
+         ethnic = q84,
+         employment = q96,
+         education = q97, 
+         religion = q98a,
+         vote = q99,
+         gender = q101,
+         race = q102,
+         legitim_court = q48a,
+         legitim_police = q48b,
+         legitim_tax = q48c,
+         trust_president = q59a,
+         trust_parliament = q59b,
+         trust_election = q59c,
+         trust_local = q59e,
+         trust_government = q59f,
+         trust_opposition = q59g,
+         trust_police = q59h,
+         trust_court = q59j
+         )
+## Round 6
+AB_r6 <- read.spss("...", to.data.frame = TRUE)
+AB_r6 <- AB_r6 %>% rename_with(~ str_to_lower(.)) %>% 
+  rename(date = dateintr,
+         country.y = country,
+         urban = urbrur,
+         age = q1,
+         ethnic = q87,
+         employment = q95,
+         education = q97, 
+         religion = q98a,
+         vote = q99,
+         gender = q101,
+         race = q102,
+         legitim_court = q42a,
+         legitim_police = q42b,
+         legitim_tax = q42c,
+         trust_president = q52a,
+         trust_parliament = q52b,
+         trust_election = q52c,
+         trust_local = q52e,
+         trust_government = q52f,
+         trust_opposition = q52g,
+         trust_police = q52h,
+         trust_court = q52j
+         )
+# Afrobarometer - Rounds + Locations
+## Round 4
+AB_r4l <- read.csv("...")
+AB_r4l <- AB_r4l %>%
+  rename(town = twnvill)
+## Round 5
+AB_r5l <- read.csv("...")
+AB_r5l <- AB_r5l %>%
+  rename(town = twnvill)
+## Round 6
+AB_r6l <- read.csv("...")
+AB_r6l <- AB_r6l %>%
+  rename(town = twnvill)
+
+# World Bank - Projects 1
+WB <- read.csv("...")
+# World Bank - Projects 2
+WB2 <- read_excel("...", skip = 2)
+WB2 <- WB2 %>% rename(project_id = id) #rename primary key to match other datasets
+# World Bank - Projects + Locations
+WB_l <- read.csv("...")
+WB_l <- WB_l %>% rename(lat = latitude, long = longitude, place_name_WB = place_name) #rename compound primary keys to match other datasets
+```
+
+```{r Prepare dataset}
+# change all missing values coded as "Missing" to NA
+AB_r4[AB_r4 == "Missing"] <- NA
+AB_r5[AB_r5 == "Missing"] <- NA # add all other codings for missing values (e.g., 998)
+AB_r6[AB_r6 == "Missing"] <- NA
+
+## some datasets had spaces in the variable respno, making it impossible to merge them to each other
+AB_r4l$respno <- trimws(AB_r4l$respno) 
+AB_r4$respno  <- trimws(AB_r4$respno)
+AB_r5l$respno <- trimws(AB_r5l$respno)
+AB_r5$respno  <- trimws(AB_r5$respno)
+AB_r6l$respno <- trimws(AB_r6l$respno)
+AB_r6$respno  <- trimws(AB_r6$respno)
+```
+
+Datasets information:
+
+Each primary key of each dataset uniquely identifies each observation:
+AB               dataset : primary key respno round
+AB_r* and AB_r*l datasets: primary key respno
+WB and WB2       datasets: primary key project_location_id
+WB_l             dataset : primary key project_location_id
+
+Roadmap to merge datasets
+1. Merge/left-join to AB_r4l, AB_r5l, AB_r6l based on respno     from AB_r4, AB_r5, AB_r6
+2. Merge/left-join to AB                     by adding rows      from AB_r4l, AB_r5l, AB_r6l
+3. Merge/left-join to WB                     based on project_id from WB2 
+4. Merge/left-join to WB_l                   based on project_id from WB -> WB_l: project_location_id
+
+Dataset preparation
+
+```{r Join datasets}
+# 1.
+AB_r4l <- left_join(AB_r4l, AB_r4, by = join_by(respno))
+AB_r5l <- left_join(AB_r5l, AB_r5, by = join_by(respno))
+AB_r6l <- left_join(AB_r6l, AB_r6, by = join_by(respno))
+# Some respno did not have a location -> they do not appear in the new dataset anymore
+
+# 2.
+# Convert all variables to characters to better merge (converting all to numeric wouldn't work)
+AB_r4l <- AB_r4l %>%
+  mutate(across(everything(), as.character))
+AB_r5l <- AB_r5l %>%
+  mutate(across(everything(), as.character))
+AB_r6l <- AB_r6l %>%
+  mutate(across(everything(), as.character))
+
+# Check for unique identifying key "respno":
+sum(duplicated(AB_r4l$respno)) # all three AB_r4m, AB_r5m, AB_r6m have uniquely identifying key "respno"
+# However, some "respno" appear multiple times across rounds, even though they represent different individuals!
+
+# Modify "respno" to include each round number
+AB_r4l <- AB_r4l %>% 
+  mutate(respno = paste0(respno, "_r4"))
+AB_r5l <- AB_r5l %>% 
+  mutate(respno = paste0(respno, "_r5"))
+AB_r6l <- AB_r6l %>% 
+  mutate(respno = paste0(respno, "_r6"))
+
+AB <- bind_rows(AB_r4l, AB_r5l, AB_r6l)
+# Yields a dataset with "respno" as unique identifier and 74.372 observations 
+
+# Change back character variables to appropriate class
+# Function that checks each column to see if it can be converted to numeric
+convert_to_numeric <- function(df) {
+  df[] <- lapply(df, function(x) {
+    if (all(grepl("^\\d+$", x))) as.numeric(x) else x
+  })
+  return(df)
+}
+# Apply the function
+AB <- convert_to_numeric(AB)
+
+# 3.
+WB <- left_join(WB, WB2, by = join_by(project_id))
+
+# 4.
+WB <- left_join(WB_l, WB, by = join_by(project_id)) # full_join ?
+# Yields a dataset with project_location_id as the unique identifier and 61.243 observations
+```
+
+```{r Explore World Bank data}
+print(n_distinct(WB$project_id))
+# 5684 unique observations of projects -> 5684 projects in 61.243 locations
+
+print(WB %>%
+  filter(is.na(project_title)) %>%
+  summarise(unique_count = n_distinct(project_id)))
+# for all of those 5684 unique observations, the dataset WB provided data
+print(WB %>%
+  filter(is.na(regionname)) %>%
+  summarise(unique_count = n_distinct(project_id)))
+# for all of those 5684 unique observations, the dataset WB2 provided data
+
+print(n_distinct(WB$project_id) - n_distinct(WB$project_id))
+# to the previous WB dataset, 197 observations get lost due to missing locational data
+
+WB2 |> 
+  anti_join(WB, join_by(project_id)) |> 
+  distinct(project_id)
+# 16,534 projects of WB2 do not have a match in WB; WB2 has more 16,534 projects recorded than WB, but WB projects are almost completely reflected in the WB_l dataset (only 197 do not have a location)
+# Consequently, we could leave out the WB2 dataset, as it doesnt have additional information to WB, also it is coded very poorly which makes in inappropriate to the use here
+```
+
+```{r Prepare datasets 2}
+# Remove WB2 from the WB dataset: variables after "total_disbursements"
+WB <- WB %>%
+  select(1:which(names(WB) == "regionname"))
+
+# Only keep WB projects that have iso3 codes for the countries in AB
+# List of country names
+countries <- c("Benin", "Burkina Faso", "Cape Verde", "Ghana", "Kenya", 
+               "Lesotho", "Liberia", "Madagascar", "Mali", "Malawi", "Mozambique", 
+               "Namibia", "Nigeria", "South Africa", "Senegal", "Tanzania", "Uganda", 
+               "Zambia", "Burundi", "Cameroon", "Cote d’Ivoire", 
+               "Egypt", "Guinea", "Mauritius", "Morocco", "Sierra Leone",
+               "Togo", "Tunisia", "Cote d'Ivoire")
+
+#               ,"Algeria", "Botswana", "Gabon", "Niger", "São Tomé and Príncipe", "Sudan", "Swaziland", "Zimbabwe"
+# !!! leave out countries only for the map !!!
+# filter(!country %in% c("Algeria", "Botswana", "Gabon", "Niger", 
+#                          "São Tomé and Príncipe", "Sudan", "Swaziland", "Zimbabwe"))
+
+
+# Get ISO3 codes
+iso3_codes <- countrycode(countries, "country.name", "iso3c")
+       
+# Filter the WB dataset to keep only matching observations
+WB <- WB %>% 
+  filter(recipients_iso3 %in% iso3_codes)
+
+
+WB <- WB %>%
+  select("project_location_id", "project_id", "geoname_id", "place_name_WB", "lat", "long", "start_actual_isodate", "end_actual_isodate", "ad_sector_codes", "ad_sector_names")
+
+# Convert time stamp to year
+AB <- AB %>%
+  mutate(date = as.numeric(date))
+AB$date <- as.POSIXct(AB$date, origin = "1582-10-14")
+# Convert dates to year
+AB$year <- format(AB$date, "%Y")
+
+# Step 1: Convert start_actual_isodate, end_actual_isodate to Date format
+WB$start_actual_isodate <- as.Date(WB$start_actual_isodate, format = "%Y-%m-%d")
+WB$end_actual_isodate   <- as.Date(WB$end_actual_isodate, format = "%Y-%m-%d")
+# Step 2: Extract the year
+WB$start_actual_isodate <- format(WB$start_actual_isodate, "%Y")
+WB$end_actual_isodate   <- format(WB$end_actual_isodate, "%Y")
+
+# Select relevant variables (some were not asked in all rounds)
+AB <- AB %>%
+  select("respno", "round", "year", "date", "country", "urban", "precision", "region_name", "region_code", "place_name", "geoname_adm_name", "town", "lat", "long", # key variables
+         "age", "ethnic", "employment", "education", "religion", "vote", "gender", "race", # key Q variables 
+         "legitim_court", "legitim_police", "legitim_tax", # institutions authority, compliance obligation
+         "trust_president", "trust_parliament", "trust_election", "trust_local", "trust_government", "trust_opposition", "trust_police", "trust_court") # trust in institutions
+
+### identify NAs
+## identify questions i.e. variables that were not asked in all countries
+# Group by 'round' and summarize the count of observations per round
+print(AB %>%
+  group_by(round) %>%
+  summarise(count = n()))
+# Create a summary of missing values for each variable in each round
+print(AB %>%
+  group_by(round) %>%
+  summarise_all(~ sum(is.na(.))))
+
+# AB_rlm round == "r5" has 
+# 4065 NAs for ethnic (due to mostly Algeria, fewer Egypt), 
+# 1856 NAs for trust_election (due to mostly Madagascar, fewer Morocco), 
+# 1545 NAs for trust_local (due to mostly Malawi)
+# 1545 NAs for trust_parliament (due to mostly Madagascar)
+# NAs for vote, trust_president, trust_government (due to mostly Swaziland)
+
+
+filtered_WB <- WB %>%
+  filter(start_actual_isodate >= 2008 & end_actual_isodate <= 2015)
+
+# Count the unique project_location_id in the filtered dataset
+unique_count <- filtered_WB %>%
+  summarise(unique_locations = n_distinct(project_location_id))
+
+# Print the result
+print(unique_count)
+```
+
+```{r Test - robustness check: subset project type}
+# WB dataset has ad_sector_codes (project type)
+# WB_subset <- filter(WB, ad_sector_codes %in% c("sector1", "sector2"))
+
+# WB <- WB[grepl("Government and civil society, general", WB$ad_sector_names) | 
+#                 grepl("Other social infrastructure and services", WB$ad_sector_names), ]
+```
+
+```{r Explore sampling, unit of observation}
+# sampling representative at country level -> each citizen each probability of being selected (random selection at every sampling stage)
+# (repeated cross-sectional): not same respno, also not same long&lat
+# Levels of unit of observations: respno -> long&lat -> town -> geoname_adm_name place_name -> region_name region_code -> country
+
+# AB_rlm smallest unit of observation trackable over time (that occur "enough" over (time/)round - not surveyed every year)
+# Treatment is at level: long&lat coordinate ("what can I match that to that is trackable over time")
+
+# In practice: do values of unit repeat/occur again at different levels of year?
+
+# Calculate the total number of unique places in the entire dataset
+print(AB %>%
+  distinct(country) %>%
+  summarize(total = n()))
+# coordinate-pair: even survey locations are selected randomly - no coordinate-pair appears multiple times across the survey rounds, i.e., we cannot track survey locations (and their area) over time -> no panel data possible, only at higher unit of observation; also within these EAs -> households & individuals in households are selected randomly
+# town 10603; 
+# geoname_adm_name 6994
+# place_name 6877
+# region_name 588
+# region_code 489
+# country 37
+
+# Calculate the number of unique places in each round
+print(AB %>%
+  group_by(place_name) %>%
+  summarise(unique_places = n_distinct(place_name)))
+# town r4 2351, r5 4036, r6 4664;
+# geoname_adm_name r4 1987, r5 3110, r6 3088
+# place_name ???
+# region_name 588
+# region_code 489
+# country 37
+
+# Find places that have observations in all rounds
+print(AB %>%
+  group_by(country) %>%
+  summarise(rounds_present = n_distinct(round)) %>%
+  filter(rounds_present == 3) %>%
+  select(country))
+# town 22;
+# geoname_adm_name 163; 
+# place_name 166
+# region_name 179
+# region_code 212
+# country 20
+
+# Step 1: Calculate the number of distinct rounds for each place
+rounds_per_place <- AB %>%
+  group_by(town) %>%
+  summarise(rounds_present = n_distinct(round))
+rounds_per_place <- rounds_per_place %>%
+  mutate(in_all_rounds = rounds_present == 3)
+AB <- AB %>%
+  left_join(rounds_per_place, by = "town")
+
+print(AB %>%
+  filter(in_all_rounds == TRUE))
+```
+
+```{r Join projects to respondents}
+# Convert AB_rlm & WB_lm to sf object
+AB <- st_as_sf(AB, coords = c("long", "lat"), crs = 4326) # create single "geometry" variable with "point" values from two "long" and "lat" variables
+WB <- st_as_sf(WB, coords = c("long", "lat"), crs = 4326)
+
+# Transform to a projected coordinate system (meters) - using EPSG code 3857
+AB <- st_transform(AB, crs = 3857)
+WB <- st_transform(WB, crs = 3857)
+
+# Create a 10km, 20km, 30km buffer around each respondent - converts "geometry" variable to "polygon" values
+AB_10 <- st_buffer(AB, dist = 10000) # 10000 meters = 10 km; dont talk about EAs; use a buffer around coordinates of EA
+AB_20 <- st_buffer(AB, dist = 20000) # 20000 meters = 20 km; dont talk about EAs; use a buffer around coordinates of EA
+AB_30 <- st_buffer(AB, dist = 30000) # 30000 meters = 30 km; dont talk about EAs; use a buffer around coordinates of EA
+
+# Perform the spatial join WB_lm to AB_rlm based on the buffer
+AB_WB_10 <- st_join(AB_10, WB, join = st_intersects) 
+AB_WB_20 <- st_join(AB_20, WB, join = st_intersects)
+AB_WB_30 <- st_join(AB_30, WB, join = st_intersects)
+# st_intersects checks if any part of the project points intersects with the buffer around the respondent points
+# 31 AB variables + 29 WB variables (one used to match) -> 59 variables
+
+nrow(AB)
+nrow(AB_WB_10) # number of rows in the joined result joined_AB_WB is greater than the target AB_rlm. Because some respondents in AB_rlm have multiple matches in WB_lm.
+
+# explore
+print(n_distinct(AB_WB_10$project_id)) # 835  projects & 385,219 locations within 10 km radius of (a) survey respondent(s)
+print(n_distinct(AB_WB_20$project_id)) # 1165 projects & 714,977 locations within 20 km radius of (a) survey respondent(s)
+print(n_distinct(AB_WB_30$project_id)) # ???  projects & ??? locations within 30 km radius of (a) survey respondent(s)
+```
+
+```{r Select variables, take care of NAs}
+AB_WB_10 <- AB_WB_10 %>% # 10 km 
+  select("respno", "year", "project_location_id", "start_actual_isodate", "end_actual_isodate")
+AB_WB_20 <- AB_WB_20 %>% # 20 km
+  select("respno", "year", "project_location_id", "start_actual_isodate", "end_actual_isodate")
+AB_WB_30 <- AB_WB_30 %>% # 30 km
+  select("respno", "year", "project_location_id", "start_actual_isodate", "end_actual_isodate")
+
+# Some date variables have NAs
+# Since data on the exact dates of funding commitments are sparse most geo-referenced locations can only be related to the year that a specific commitment was made.
+# this means that some project_location_id do not have an end_actual_isodate, wherefore we cannot calculate the treatment
+# Convert blank strings ("") to NA for start_actual_isodate, end_actual_isodate variable
+AB_WB_10$end_actual_isodate[AB_WB_10$end_actual_isodate == ""] <- NA
+AB_WB_20$end_actual_isodate[AB_WB_20$end_actual_isodate == ""] <- NA
+AB_WB_30$end_actual_isodate[AB_WB_30$end_actual_isodate == ""] <- NA
+
+
+AB_WB_10$start_actual_isodate[AB_WB_10$start_actual_isodate == ""] <- NA
+AB_WB_20$start_actual_isodate[AB_WB_20$start_actual_isodate == ""] <- NA
+AB_WB_30$start_actual_isodate[AB_WB_30$start_actual_isodate == ""] <- NA
+
+# remove observations with NAs
+AB_WB_10 <- na.omit(AB_WB_10, cols = "end_actual_isodate")
+# 835  -> 692 projects & 385,219 -> 291,532 locations within 10 km radius of (a) survey respondent(s)
+AB_WB_20 <- na.omit(AB_WB_20, cols = "end_actual_isodate")
+# 1165 -> 965 projects & 714,977 -> 580,523 locations within 20 km radius of (a) survey respondent(s)
+AB_WB_30 <- na.omit(AB_WB_30, cols = "end_actual_isodate")
+# ???  -> ??? projects & 1,069,714 -> 881,866 locations within 30 km radius of (a) survey respondent(s)
+```
+
+```{r Create treatment variables}
+# WB project duration period (start_actual_isodate - end_actual_isodate)
+# Create 3 treatment dummy variables indicating - respondent survey (year): before period, during period, after period
+# Future, Ongoing, Completed
+
+# Future
+AB_WB_10$future_10 <- ifelse(AB_WB_10$year < AB_WB_10$start_actual_isodate, 1, 0)
+AB_WB_20$future_20 <- ifelse(AB_WB_20$year < AB_WB_20$start_actual_isodate, 1, 0)
+AB_WB_30$future_30 <- ifelse(AB_WB_30$year < AB_WB_30$start_actual_isodate, 1, 0)
+
+# Ongoing
+AB_WB_10$ongoing_10 <- ifelse(AB_WB_10$year >= AB_WB_10$start_actual_isodate & AB_WB_10$year <= AB_WB_10$end_actual_isodate, 1, 0)
+AB_WB_20$ongoing_20 <- ifelse(AB_WB_20$year >= AB_WB_20$start_actual_isodate & AB_WB_20$year <= AB_WB_20$end_actual_isodate, 1, 0)
+AB_WB_30$ongoing_30 <- ifelse(AB_WB_30$year >= AB_WB_30$start_actual_isodate & AB_WB_30$year <= AB_WB_30$end_actual_isodate, 1, 0)
+
+# Completed
+AB_WB_10$completed_10 <- ifelse(AB_WB_10$year > AB_WB_10$end_actual_isodate, 1, 0)
+AB_WB_20$completed_20 <- ifelse(AB_WB_20$year > AB_WB_20$end_actual_isodate, 1, 0)
+AB_WB_30$completed_30 <- ifelse(AB_WB_30$year > AB_WB_30$end_actual_isodate, 1, 0)
+
+
+# placebo treatment = similar logic as start_actual_isodate (but a year "earlier"?)
+
+
+# aggregating to the unique identifier "respno"
+# When dealing with a treatment variable like post_treatment, where a respondent (respno) might have been treated by multiple projects (project_location_id), the goal is to aggregate this post_treatment information so that respno becomes a unique identifier. What do I want to know?
+## whether a respondent was treated at all by any project location: Use the Maximum Treatment Indicator or Any Treatment Indicator.
+## how many times a respondent was treated across different project locations: Use the Sum of Treatments.
+## could also:
+## proportion of project locations that treated the respondent: Use the Proportion Treated.
+## Approach here: Calculate the count of the post_treatment variable.
+```
+
+```{r OPTIONAL: lead and lag variables future_10 & completed_10}
+# only for future_10 & completed_10; ongoing_10 stays same
+```
+
+```{r TAKES LONG: aggregate to respno}
+AB_WB_10_agg <- AB_WB_10 %>%
+  group_by(respno) %>%
+  summarize(
+    year                 = paste(unique(year),                 collapse = ", "),
+    project_location_id  = paste(unique(project_location_id),  collapse = ", "),
+    start_actual_isodate = paste(unique(start_actual_isodate), collapse = ", "),
+    end_actual_isodate   = paste(unique(end_actual_isodate),   collapse = ", "),
+    future_10            = sum(future_10,     na.rm = TRUE),
+    ongoing_10           = sum(ongoing_10,    na.rm = TRUE),
+    completed_10         = sum(completed_10,  na.rm = TRUE)
+  )
+# nrow(AB_WB_10_agg) 34708 respondents
+# 34708 unique respondents after deletion of NA, i.e., non-existing end_actual_isodate data 
+
+AB_WB_20_agg <- AB_WB_20 %>%
+  group_by(respno) %>%
+  summarize(
+    year                 = paste(unique(year),                 collapse = ", "),
+    project_location_id  = paste(unique(project_location_id),  collapse = ", "),
+    start_actual_isodate = paste(unique(start_actual_isodate), collapse = ", "),
+    end_actual_isodate   = paste(unique(end_actual_isodate),   collapse = ", "),
+    future_20            = sum(future_20,     na.rm = TRUE),
+    ongoing_20           = sum(ongoing_20,    na.rm = TRUE),
+    completed_20         = sum(completed_20,  na.rm = TRUE)
+  )
+# nrow(AB_WB_20_agg) 46210 respondents
+
+AB_WB_30_agg <- AB_WB_30 %>%
+  group_by(respno) %>%
+  summarize(
+    year                 = paste(unique(year),                 collapse = ", "),
+    project_location_id  = paste(unique(project_location_id),  collapse = ", "),
+    start_actual_isodate = paste(unique(start_actual_isodate), collapse = ", "),
+    end_actual_isodate   = paste(unique(end_actual_isodate),   collapse = ", "),
+    future_30            = sum(future_30,     na.rm = TRUE),
+    ongoing_30           = sum(ongoing_30,    na.rm = TRUE),
+    completed_30         = sum(completed_30,  na.rm = TRUE)
+  )
+# nrow(AB_WB_30_agg) 53722 respondents
+```
+
+Join datasets
+
+```{r Join AB data and aggregate data}
+# Drop year variables
+AB_WB_10_agg <- AB_WB_10_agg %>%
+  select(-year)
+AB_WB_20_agg <- AB_WB_20_agg %>%
+  select(-year)
+AB_WB_30_agg <- AB_WB_30_agg %>%
+  select(-year)
+# Convert the spatial datasets to regular data frames, dropping the geometry column
+AB_WB_10_agg <- AB_WB_10_agg %>% st_drop_geometry()
+AB_WB_20_agg <- AB_WB_20_agg %>% st_drop_geometry()
+AB_WB_30_agg <- AB_WB_30_agg %>% st_drop_geometry()
+
+# Perform the joins, keeping the spatial data in AB
+AB <- AB %>%
+  left_join(AB_WB_10_agg %>% select(respno, future_10, ongoing_10, completed_10), by = "respno") %>%
+  left_join(AB_WB_20_agg %>% select(respno, future_20, ongoing_20, completed_20), by = "respno") %>%
+  left_join(AB_WB_30_agg %>% select(respno, future_30, ongoing_30, completed_30), by = "respno") %>%
+  mutate(across(starts_with("future_"),     ~ coalesce(., 0)),
+         across(starts_with("ongoing_"),    ~ coalesce(., 0)),
+         across(starts_with("completed_"),  ~ coalesce(., 0)))
+# code all NAs in the treatment variables as non-treated (i.e. no project was matched)
+
+# modify the country variable, replacing "Cote d’Ivoire" with "Cote d'Ivoire"
+AB <- AB %>%
+  mutate(country = recode(country, "Cote d’Ivoire" = "Cote d'Ivoire"))
+
+# rm(list = setdiff(ls(), c("AB", "AB_WB_10_agg", "AB_WB_20_agg", "AB_WB_30_agg", "WB")))
+```
+
+```{r Prepare treatment variables}
+# create new binary treatment variables if there was at least one project location
+AB <- AB %>%
+  mutate(
+    future_10b     = ifelse(future_10     > 0, 1, 0),
+    future_20b     = ifelse(future_20     > 0, 1, 0),
+    future_30b     = ifelse(future_30     > 0, 1, 0),
+    ongoing_10b    = ifelse(ongoing_10    > 0, 1, 0),
+    ongoing_20b    = ifelse(ongoing_20    > 0, 1, 0),
+    ongoing_30b    = ifelse(ongoing_30    > 0, 1, 0),
+    completed_10b  = ifelse(completed_10  > 0, 1, 0),
+    completed_20b  = ifelse(completed_20  > 0, 1, 0),
+    completed_30b  = ifelse(completed_30  > 0, 1, 0)
+  )
+
+# For example
+sum(AB$completed_10b) # 25868, 35 % of 74372 respondents are treated by a ended project location (within 0 -10km)
+sum(AB$completed_20b) # 26971, 36 % of 74372 respondents are treated by a ended project location (within 10-20km)
+sum(AB$completed_30b) # 38720, 55 % of 74372 respondents are treated by a ended project location (within 20-30km)
+
+```
+
+```{r Prepare dependent variables}
+# Convert to binary variable
+
+# Recode ("Don't know","Don’t Know") as NA
+AB <- AB %>%
+  mutate(
+    legitim_court  = na_if(legitim_court,  "Don't know"),
+    legitim_court  = na_if(legitim_court,  "Don’t Know"),
+    legitim_police = na_if(legitim_police, "Don't know"),
+    legitim_police = na_if(legitim_police, "Don’t Know"),
+    legitim_tax    = na_if(legitim_tax,    "Don't know"),
+    legitim_tax    = na_if(legitim_tax,    "Don’t Know")
+  )
+
+# Convert to binary (factor with 5 levels: "Strongly Disagree", "Disagree", "Neither Agree Nor Disagree", "Agree", "Strongly Agree")
+AB$legitim_court_b  <- ifelse(AB$legitim_court  %in% c("Agree", "Strongly Agree"), 1, 0)
+AB$legitim_police_b <- ifelse(AB$legitim_police %in% c("Agree", "Strongly Agree"), 1, 0)
+AB$legitim_tax_b    <- ifelse(AB$legitim_tax    %in% c("Agree", "Strongly Agree"), 1, 0)
+
+class(AB$legitim_court_b)
+```
+
+```{r Prepare controls}
+# age
+AB$age <- as.numeric(AB$age)
+# hist(AB$age)
+# gender to a binary numeric variable
+AB$gender <- ifelse(AB$gender == "Male", 1, 0) # Female 0, Male 1
+# summary(AB$gender) # 49.81 % Male 
+# urban/rural residence
+AB$urban <- ifelse(AB$urban == "Urban", 1, 0) # Rural 0, Urban 1
+# summary(AB$urban) # 45.1 % live in Urban areas
+# year fixed effects
+AB$year <- as.factor(AB$year)
+# country fixed effects
+AB$country <- as.factor(AB$country)
+# Treatment cluster (groups of 8 individuals) - from coordinates i.e. sf geometry object
+## Convert sf geometry object to a unique cluster group identifier
+AB$cluster_id <- as.factor(paste(st_coordinates(AB$geometry)[,1], st_coordinates(AB$geometry)[,2]))
+```
+
+```{r Restrict sample to countries with treatment variation}
+# drop countries that have not observations in all three treatment categories -> restrict the sample 
+country_counts <- AB %>%
+  group_by(country) %>%
+  summarise(
+    future_10b_count    = sum(future_10b    == 1, na.rm = TRUE),
+    ongoing_10b_count   = sum(ongoing_10b   == 1, na.rm = TRUE),
+    completed_10b_count = sum(completed_10b == 1, na.rm = TRUE)
+  )
+
+# View the result
+print(country_counts)
+
+# To only have 
+# Algeria, Botswana, Gabon, Niger, São Tomé and Príncipe, Sudan, Swaziland, Zimbabwe
+
+AB <- AB %>%
+  filter(!country %in% c("Algeria", "Botswana", "Gabon", "Niger", 
+                         "São Tomé and Príncipe", "Sudan", "Swaziland", "Zimbabwe"))
+print(unique(AB$country))
+
+## 28 remaining countries:
+# Benin         Burkina Faso  Cape Verde    Ghana         Kenya         Lesotho       Liberia       Madagascar   
+# Mali          Malawi        Mozambique    Namibia       Nigeria       South Africa  Senegal       Tanzania     
+# Uganda        Zambia        Burundi       Cameroon      Cote d'Ivoire Egypt         Guinea        Mauritius    
+# Morocco       Sierra Leone  Togo          Tunisia      
+
+
+# create summary statistics dataset
+# AB_summarise <- AB %>%
+#   st_drop_geometry()
+
+# AB_subset <- AB
+```
+
+Final Dataset:
+respno | future_* b  ongoing_* b  completed_* b | legitim_court_b legitim_police_b legitim_tax_b | | | age | gender | urban
+
+```{r CHECKPOINT: save or load dataset}
+# load AB or AB_subset or WB or AB_summary?
+
+# save(AB, file = "...")
+
+# write.csv(AB, file = "...", row.names = FALSE)
+
+# load("AB_subset.RData")
+```
+
+Explore Data 
+
+```{r RESET: keep main objects}
+rm(list = setdiff(ls(), c("AB_final", "AB","AB_summary", "AB_subset", "WB", "AB_WB_10_agg", "AB_WB_20_agg", "AB_WB_30_agg")))
+```
+
+```{r Descriptive exploration}
+# Assuming your data frame is called `df`
+summary_table_data <- AB_summarise %>%
+  st_drop_geometry() %>%  # Remove the geometry column properly
+  dplyr::summarise(
+    `Age (mean)`            = round(mean(age,              na.rm = TRUE), 2),
+    `Age (sd)`              = round(sd(age,                na.rm = TRUE), 2),
+    `Male (%)`              = round(mean(gender == 1,      na.rm = TRUE)*100, 2),
+    `Urban (%)`             = round(mean(urban == 1,       na.rm = TRUE)*100, 2),
+    `Future    10km (%)`    = round(mean(future_10b,       na.rm = TRUE)*100, 2),
+    `Ongoing   10km (%)`    = round(mean(ongoing_10b,      na.rm = TRUE)*100, 2),
+    `Completed 10km (%)`    = round(mean(completed_10b,    na.rm = TRUE)*100, 2),
+    `Legitimacy Court (%)`  = round(mean(legitim_court_b,  na.rm = TRUE)*100, 2),
+    `Legitimacy Police (%)` = round(mean(legitim_police_b, na.rm = TRUE)*100, 2),
+    `Legitimacy Tax (%)`    = round(mean(legitim_tax_b,    na.rm = TRUE)*100, 2),
+    `Observations`          = as.integer(n())
+  )
+
+# Convert to flextable
+ft <- flextable(summary_table_data)
+# Create a Word document and add the table
+doc <- read_docx() %>%
+  body_add_par("Summary Statistics Dataset", style = "heading 1") %>%
+  body_add_flextable(ft)
+# Save the Word document
+print(doc, target = "summary_table_a.docx")
+```
+
+```{r Descriptive exploration per country}
+summary_table_years <- AB_summarise %>%
+  st_drop_geometry() %>%  # Remove the geometry column properly
+  dplyr::group_by(year) %>%
+  summarise(
+    `Age (mean)`            = round(mean(age,              na.rm = TRUE), 2),
+    `Age (SD)`              = round(sd(age,                na.rm = TRUE), 2),
+    `Age (min)`             = round(min(age,               na.rm = TRUE), 2),
+    `Age (max)`             = round(max(age,               na.rm = TRUE), 2),
+    `Age (median)`          = round(median(age,            na.rm = TRUE), 2),
+    `Male (%)`              = round(mean(gender == 1,      na.rm = TRUE)*100, 2),
+    `Urban (%)`             = round(mean(urban == 1,       na.rm = TRUE)*100, 2),
+    `Future    10km (%)`    = round(mean(future_10b,       na.rm = TRUE)*100, 2),
+    `Ongoing   10km (%)`    = round(mean(ongoing_10b,      na.rm = TRUE)*100, 2),
+    `Completed 10km (%)`    = round(mean(completed_10b,    na.rm = TRUE)*100, 2),
+    `Legitimacy Court (%)`  = round(mean(legitim_court_b,  na.rm = TRUE)*100, 2),
+    `Legitimacy Police (%)` = round(mean(legitim_police_b, na.rm = TRUE)*100, 2),
+    `Legitimacy Tax (%)`    = round(mean(legitim_tax_b,    na.rm = TRUE)*100, 2),
+    `Observations`          = as.integer(n()),
+    .groups = 'drop'  # Ungroup after summarise
+  ) %>%
+  pivot_longer(cols = -c(year), names_to = "Statistic", values_to = "Value") %>%
+  pivot_wider(names_from = year, values_from = Value)
+
+# Convert to flextable
+ft <- flextable(summary_table_years)
+# Create a Word document and add the table
+doc <- read_docx() %>%
+  body_add_par("Summary Statistics Years", style = "heading 1") %>%
+  body_add_flextable(ft)
+# Save the Word document
+print(doc, target = "summary_table_y.docx")
+```
+
+```{r Map respondents and projects}
+# Load the Africa map data
+africa <- ne_countries(scale = "medium", returnclass = "sf", continent = "Africa")
+AB$source <- "AB"
+WB$source <- "WB"
+# Create the map
+ggplot() +
+  geom_sf(data = africa, fill  = "white", color = "black") +               # Plot Africa
+  geom_sf(data = AB,     fill  = "brown", color = "brown", size = 0.5) +
+  geom_sf(data = WB,     color = "black", size  = 0.02) +
+  theme_void() + # Removes the coordinate system and makes the background white
+  theme(
+    legend.position = "bottom",
+    plot.background = element_rect(fill = "white", color = NA)
+  ) +
+labs(title = "Distribution of Respondents and Development Projects",
+    subtitle = "Afrobarometer Suvey Cluster (red) | World Bank Project Locations (black)"
+  )
+
+ggsave(
+  filename = "africa_map.jpg",  # file name and format (e.g., .png, .jpg, .pdf, etc.)
+  plot = last_plot(),           
+  width = 10,                   # Width 
+  height = 7,                   # Height 
+  dpi = 300                     # Resolution 
+)
+```
+
+```{r Exploration}
+AB_final$
+```
+
+Causal exploration
+
+```{r Regression description}
+# 10km distance
+## 3 binary independent variables -> binary dependent variable legitim_court_b
+## 3 binary independent variables -> binary dependent variable legitim_police_b
+## 3 binary independent variables -> binary dependent variable legitim_tax_b
+# 20km distance as robustness check
+# 30km distance as robustness check
+
+# Regression formula: 
+# Y_ivt=β_1 〖Ongoing〗_vt+β_2 〖Completed〗_vt+β_3 〖Future〗_vt+α_s+λ_t+X_it+ϵ_ivt
+# country and time fixed effects
+# more specifications: clustered standard errors ???
+# ...
+
+# first regression
+# future_10b, ongoing_10b, completed_10b, legitim_court_b, legitim_police_b, legitim_tax_b, age, gender, urban
+```
+
+- Big regression tables
+
+```{r Regressions combine AB_final}
+ABreg1 <- AB_final %>%
+  rename(
+    future = future_10b,
+    ongoing = ongoing_10b,
+    completed = completed_10b
+  )
+# AB_final (all), 10km
+model_10c <- feols(legitim_court_b  ~ future + ongoing + completed + age + gender + urban | country + year, data = ABreg1, cluster = ~ cluster_id)
+model_10p <- feols(legitim_police_b ~ future + ongoing + completed + age + gender + urban | country + year, data = ABreg1, cluster = ~ cluster_id)
+model_10t <- feols(legitim_tax_b    ~ future + ongoing + completed + age + gender + urban | country + year, data = ABreg1, cluster = ~ cluster_id)
+ABreg2 <- AB_final %>%
+  rename(
+    future = future_20b,
+    ongoing = ongoing_20b,
+    completed = completed_20b
+  )
+# AB_final (all), 20km
+model_20c <- feols(legitim_court_b  ~ future + ongoing + completed + age + gender + urban | country + year, data = ABreg2, cluster = ~ cluster_id)
+model_20p <- feols(legitim_police_b ~ future + ongoing + completed + age + gender + urban | country + year, data = ABreg2, cluster = ~ cluster_id)
+model_20t <- feols(legitim_tax_b    ~ future + ongoing + completed + age + gender + urban | country + year, data = ABreg2, cluster = ~ cluster_id)
+ABreg3 <- AB_final %>%
+  rename(
+    future = future_30b,
+    ongoing = ongoing_30b,
+    completed = completed_30b
+  )
+# AB_final (all), 30km
+model_30c <- feols(legitim_court_b  ~ future + ongoing + completed + age + gender + urban | country + year, data = ABreg3, cluster = ~ cluster_id)
+model_30p <- feols(legitim_police_b ~ future + ongoing + completed + age + gender + urban | country + year, data = ABreg3, cluster = ~ cluster_id)
+model_30t <- feols(legitim_tax_b    ~ future + ongoing + completed + age + gender + urban | country + year, data = ABreg3, cluster = ~ cluster_id)
+
+
+
+htmlreg(list(model_10c, model_10p, model_10t, model_20c, model_20p, model_20t, model_30c, model_30p, model_30t), # htmlreg (or screenreg): print out the regression output directly
+          rename.coef = rename_vector,
+          single.row = TRUE,
+          custom.header = list("10km Radius" = 1:3, "20km Radius" = 4:6, "30km Radius" = 7:9), # "Ueberschrift" = c(nummer, nummer, ...) -nummern der models 
+          custom.model.names = c("Court", "Police", "Tax", "Court", "Police", "Tax", "Court", "Police", "Tax"),
+          custom.coef.names = c("Future", "Ongoing", "Completed", "Age", "Gender",
+                              "Urban"),
+          caption.above = TRUE,
+          caption = "World Bank Projects and Institutional Legitimacy", # add caption
+          groups = list("Project Status" = 1:3, "Control Variables" = 4:6), # group coefficients for better overview
+          star.symbol = "*",
+          include.adjrs = FALSE,
+          include.loglik = FALSE, # Do not include certain goodness-of-fit statistics, as they are irrelevant for our purposes
+          include.deviance = FALSE,
+          include.aic = FALSE,
+          include.bic = FALSE,
+          include.rsq.partial = FALSE, # Exclude R2 (proj model)
+          omit.coef = "(thresh)|(ranef)", 
+          file = "regression_output1.html"
+          )
+
+# limitations: acknowledge that linear might not be the best - with an binary outcome variable -> limitations
+# Binary dependent Variable in feols: typically be interpreted as a linear probability model (LPM)
+# interpretations: "3 % difference in legitimacy on average btw groups that have a future project and people that dont have a future" project (ongoing, completed)" -> 
+
+
+# descriptive statistics, average, sd, min, max 
+# graphs: how many completed projects -> 
+# what kind of people. 
+
+# leads and lags
+
+# descriptive statistics checklist from moodle
+```
+
+```{r Regressions combine AB_subset}
+ABregs1 <- AB_subset %>%
+  rename(
+    future = future_10b,
+    ongoing = ongoing_10b,
+    completed = completed_10b
+  )
+# AB_final (all), 10km
+model_s10c <- feols(legitim_court_b  ~ future + ongoing + completed + age + gender + urban | country + year, data = ABregs1, cluster = ~ cluster_id)
+model_s10p <- feols(legitim_police_b ~ future + ongoing + completed + age + gender + urban | country + year, data = ABregs1, cluster = ~ cluster_id)
+model_s10t <- feols(legitim_tax_b    ~ future + ongoing + completed + age + gender + urban | country + year, data = ABregs1, cluster = ~ cluster_id)
+ABregs2 <- AB_subset %>%
+  rename(
+    future = future_20b,
+    ongoing = ongoing_20b,
+    completed = completed_20b
+  )
+# AB_final (all), 20km
+model_s20c <- feols(legitim_court_b  ~ future + ongoing + completed + age + gender + urban | country + year, data = ABregs2, cluster = ~ cluster_id)
+model_s20p <- feols(legitim_police_b ~ future + ongoing + completed + age + gender + urban | country + year, data = ABregs2, cluster = ~ cluster_id)
+model_s20t <- feols(legitim_tax_b    ~ future + ongoing + completed + age + gender + urban | country + year, data = ABregs2, cluster = ~ cluster_id)
+ABregs3 <- AB_subset %>%
+  rename(
+    future = future_30b,
+    ongoing = ongoing_30b,
+    completed = completed_30b
+  )
+# AB_final (all), 30km
+model_s30c <- feols(legitim_court_b  ~ future + ongoing + completed + age + gender + urban | country + year, data = ABregs3, cluster = ~ cluster_id)
+model_s30p <- feols(legitim_police_b ~ future + ongoing + completed + age + gender + urban | country + year, data = ABregs3, cluster = ~ cluster_id)
+model_s30t <- feols(legitim_tax_b    ~ future + ongoing + completed + age + gender + urban | country + year, data = ABregs3, cluster = ~ cluster_id)
+
+
+
+htmlreg(list(model_s10c, model_s10p, model_s10t, model_s20c, model_s20p, model_s20t, model_s30c, model_s30p, model_s30t), # htmlreg (or screenreg): print out the regression output directly
+          rename.coef = rename_vector,
+          single.row = TRUE,
+          custom.header = list("10km Radius" = 1:3, "20km Radius" = 4:6, "30km Radius" = 7:9), # "Ueberschrift" = c(nummer, nummer, ...) -nummern der models 
+          custom.model.names = c("Court", "Police", "Tax", "Court", "Police", "Tax", "Court", "Police", "Tax"),
+          custom.coef.names = c("Future", "Ongoing", "Completed", "Age", "Gender",
+                              "Urban"),
+          caption.above = TRUE,
+          caption = "World Bank Institutional Development Projects and Institutional Legitimacy (subset)", # add caption
+          groups = list("Project Status" = 1:3, "Control Variables" = 4:6), # group coefficients for better overview
+          star.symbol = "*",
+          include.adjrs = FALSE,
+          include.loglik = FALSE, # Do not include certain goodness-of-fit statistics, as they are irrelevant for our purposes
+          include.deviance = FALSE,
+          include.aic = FALSE,
+          include.bic = FALSE,
+          include.rsq.partial = FALSE, # Exclude R2 (proj model)
+          omit.coef = "(thresh)|(ranef)", 
+          file = "regression_output2.html"
+          )
+```
+
+- Other Regression model specifications (varied distance)
+
+```{r Regression AB_final 10km}
+# AB_final (all), 10km
+# Regression model
+model_10c <- feols(legitim_court_b  ~ future_10b + ongoing_10b + completed_10b + age + gender + urban | country + year, data = AB_final, cluster = ~ cluster_id)
+model_10p <- feols(legitim_police_b ~ future_10b + ongoing_10b + completed_10b + age + gender + urban | country + year, data = AB_final, cluster = ~ cluster_id)
+model_10t <- feols(legitim_tax_b    ~ future_10b + ongoing_10b + completed_10b + age + gender + urban | country + year, data = AB_final, cluster = ~ cluster_id)
+# AB_final (all), 20km
+model_20c <- feols(legitim_court_b  ~ future_20b + ongoing_20b + completed_20b + age + gender + urban | country + year, data = AB_final, cluster = ~ cluster_id)
+model_20p <- feols(legitim_police_b ~ future_20b + ongoing_20b + completed_20b + age + gender + urban | country + year, data = AB_final, cluster = ~ cluster_id)
+model_20t <- feols(legitim_tax_b    ~ future_20b + ongoing_20b + completed_20b + age + gender + urban | country + year, data = AB_final, cluster = ~ cluster_id)
+# AB_final (all), 30km
+model_30c <- feols(legitim_court_b  ~ future_30b + ongoing_30b + completed_30b + age + gender + urban | country + year, data = AB_final, cluster = ~ cluster_id)
+model_30p <- feols(legitim_police_b ~ future_30b + ongoing_30b + completed_30b + age + gender + urban | country + year, data = AB_final, cluster = ~ cluster_id)
+model_30t <- feols(legitim_tax_b    ~ future_30b + ongoing_30b + completed_30b + age + gender + urban | country + year, data = AB_final, cluster = ~ cluster_id)
+
+
+
+screenreg(list(model_10c, model_10p, model_10t, model_20c, model_20p, model_20t, model_30c, model_30p, model_30t), # htmlreg (or screenreg): print out the regression output directly
+          rename.coef = rename_vector,
+          single.row = TRUE,
+          custom.header = list("Perceived Legitimacy" = 1:3), # "Ueberschrift" = c(nummer, nummer, ...) -nummern der models 
+          custom.model.names = c("Court", "Police", "Tax"),
+          custom.coef.names = c("Future", "Ongoing", "Completed", "Age", "Gender",
+                              "Urban"),
+          caption.above = TRUE,
+          caption = "World Bank Projects
+          within a 10 km radius", # add caption
+          groups = list("Independent variables" = 1:3, "Control variables" = 4:6), # group coefficients for better overview
+          star.symbol = "*",
+          include.adjrs = TRUE,
+          include.loglik = FALSE, # Do not include certain goodness-of-fit statistics, as they are irrelevant for our purposes
+          include.deviance = FALSE,
+          include.aic = FALSE,
+          include.bic = FALSE,
+          omit.coef = "(thresh)|(ranef)", 
+          file = "regression_output1.html"
+          )
+# etable(model_10c, model_10p, model_10t)
+```
+
+```{r Regression AB_subset 10km}
+# AB_subset, 10km
+model_s10c <- feols(legitim_court_b  ~ future_10b + ongoing_10b + completed_10b + age + gender + urban | country + year, data = AB_subset, cluster = ~ cluster_id)
+model_s10p <- feols(legitim_police_b ~ future_10b + ongoing_10b + completed_10b + age + gender + urban | country + year, data = AB_subset, cluster = ~ cluster_id)
+model_s10t <- feols(legitim_tax_b    ~ future_10b + ongoing_10b + completed_10b + age + gender + urban | country + year, data = AB_subset, cluster = ~ cluster_id)
+
+htmlreg(list(model_s10c, model_s10p, model_s10t), # htmlreg (or screenreg): print out the regression output directly
+          single.row = TRUE,
+          custom.header = list("Perceived Legitimacy" = 1:3), # "Ueberschrift" = c(nummer, nummer, ...) -nummern der models 
+          custom.model.names = c("Court", "Police", "Tax"),
+          custom.coef.names = c("Future", "Ongoing", "Completed", "Age", "Gender",
+                              "Urban"),
+          caption.above = TRUE,
+          caption = "World Bank Institutional Development Projects
+          within a 10 km radius", # add caption
+          groups = list("Independent variables" = 1:3, "Control variables" = 4:6), # group coefficients for better overview
+          star.symbol = "*",
+          include.adjrs = TRUE,
+          include.loglik = FALSE, # Do not include certain goodness-of-fit statistics, as they are irrelevant for our purposes
+          include.deviance = FALSE,
+          include.aic = FALSE,
+          include.bic = FALSE,
+          omit.coef = "(thresh)|(ranef)", 
+          file = "regression_output2.html"
+          )
+```
+
+```{r Regression AB_final 20km}
+model_20c <- feols(legitim_court_b  ~ future_20b + ongoing_20b + completed_20b + age + gender + urban | country + year, data = AB_final, cluster = ~ cluster_id)
+model_20p <- feols(legitim_police_b ~ future_20b + ongoing_20b + completed_20b + age + gender + urban | country + year, data = AB_final, cluster = ~ cluster_id)
+model_20t <- feols(legitim_tax_b    ~ future_20b + ongoing_20b + completed_20b + age + gender + urban | country + year, data = AB_final, cluster = ~ cluster_id)
+
+htmlreg(list(model_20c, model_20p, model_20t), # htmlreg (or screenreg): print out the regression output directly
+          single.row = TRUE,
+          custom.header = list("Perceived Legitimacy" = 1:3), # "Ueberschrift" = c(nummer, nummer, ...) -nummern der models 
+          custom.model.names = c("Court", "Police", "Tax"),
+          custom.coef.names = c("Future", "Ongoing", "Completed", "Age", "Gender",
+                              "Urban"),
+          caption.above = TRUE,
+          caption = "World Bank Projects
+          within a 20 km radius", # add caption
+          groups = list("Independent variables" = 1:3, "Control variables" = 4:6), # group coefficients for better overview
+          star.symbol = "*",
+          include.adjrs = TRUE,
+          include.loglik = FALSE, # Do not include certain goodness-of-fit statistics, as they are irrelevant for our purposes
+          include.deviance = FALSE,
+          include.aic = FALSE,
+          include.bic = FALSE,
+          omit.coef = "(thresh)|(ranef)", 
+          file = "regression_output3.html"
+          )
+```
+
+```{r Regression AB_subset 20km}
+model_s20c <- feols(legitim_court_b  ~ future_20b + ongoing_20b + completed_20b + age + gender + urban | country + year, data = AB_subset, cluster = ~ cluster_id)
+model_s20p <- feols(legitim_police_b ~ future_20b + ongoing_20b + completed_20b + age + gender + urban | country + year, data = AB_subset, cluster = ~ cluster_id)
+model_s20t <- feols(legitim_tax_b    ~ future_20b + ongoing_20b + completed_20b + age + gender + urban | country + year, data = AB_subset, cluster = ~ cluster_id)
+
+htmlreg(list(model_20c, model_20p, model_20t), # htmlreg (or screenreg): print out the regression output directly
+          single.row = TRUE,
+          custom.header = list("Perceived Legitimacy" = 1:3), # "Ueberschrift" = c(nummer, nummer, ...) -nummern der models 
+          custom.model.names = c("Court", "Police", "Tax"),
+          custom.coef.names = c("Future", "Ongoing", "Completed", "Age", "Gender",
+                              "Urban"),
+          caption.above = TRUE,
+          caption = "...
+          ...", # add caption
+          groups = list("Independent variables" = 1:3, "Control variables" = 4:6), # group coefficients for better overview
+          star.symbol = "*",
+          include.adjrs = TRUE,
+          include.loglik = FALSE, # Do not include certain goodness-of-fit statistics, as they are irrelevant for our purposes
+          include.deviance = FALSE,
+          include.aic = FALSE,
+          include.bic = FALSE,
+          omit.coef = "(thresh)|(ranef)", 
+          file = "regression_output4.html"
+          )
+```
+
+```{r Regression AB_final 30km}
+model_30c <- feols(legitim_court_b  ~ future_30b + ongoing_30b + completed_30b + age + gender + urban | country + year, data = AB_final, cluster = ~ cluster_id)
+model_30p <- feols(legitim_police_b ~ future_30b + ongoing_30b + completed_30b + age + gender + urban | country + year, data = AB_final, cluster = ~ cluster_id)
+model_30t <- feols(legitim_tax_b    ~ future_30b + ongoing_30b + completed_30b + age + gender + urban | country + year, data = AB_final, cluster = ~ cluster_id)
+
+htmlreg(list(model_30c, model_30p, model_30t), # htmlreg (or screenreg): print out the regression output directly
+          single.row = TRUE,
+          custom.header = list("Perceived Legitimacy" = 1:3), # "Ueberschrift" = c(nummer, nummer, ...) -nummern der models 
+          custom.model.names = c("Court", "Police", "Tax"),
+          custom.coef.names = c("Future", "Ongoing", "Completed", "Age", "Gender",
+                              "Urban"),
+          caption.above = TRUE,
+          caption = "...
+          ...", # add caption
+          groups = list("Independent variables" = 1:3, "Control variables" = 4:6), # group coefficients for better overview
+          star.symbol = "*",
+          include.adjrs = TRUE,
+          include.loglik = FALSE, # Do not include certain goodness-of-fit statistics, as they are irrelevant for our purposes
+          include.deviance = FALSE,
+          include.aic = FALSE,
+          include.bic = FALSE,
+          omit.coef = "(thresh)|(ranef)", 
+          file = "regression_output5.html"
+          )
+```
+
+```{r Regression AB_subset 30km}
+model_s30c <- feols(legitim_court_b  ~ future_30b + ongoing_30b + completed_30b + age + gender + urban | country + year, data = AB_subset, cluster = ~ cluster_id)
+model_s30p <- feols(legitim_police_b ~ future_30b + ongoing_30b + completed_30b + age + gender + urban | country + year, data = AB_subset, cluster = ~ cluster_id)
+model_s30t <- feols(legitim_tax_b    ~ future_30b + ongoing_30b + completed_30b + age + gender + urban | country + year, data = AB_subset, cluster = ~ cluster_id)
+
+htmlreg(list(model_30c, model_30p, model_30t), # htmlreg (or screenreg): print out the regression output directly
+          single.row = TRUE,
+          custom.header = list("Perceived Legitimacy" = 1:3), # "Ueberschrift" = c(nummer, nummer, ...) -nummern der models 
+          custom.model.names = c("Court", "Police", "Tax"),
+          custom.coef.names = c("Future", "Ongoing", "Completed", "Age", "Gender",
+                              "Urban"),
+          caption.above = TRUE,
+          caption = "...
+          ...", # add caption
+          groups = list("Independent variables" = 1:3, "Control variables" = 4:6), # group coefficients for better overview
+          star.symbol = "*",
+          include.adjrs = TRUE,
+          include.loglik = FALSE, # Do not include certain goodness-of-fit statistics, as they are irrelevant for our purposes
+          include.deviance = FALSE,
+          include.aic = FALSE,
+          include.bic = FALSE,
+          omit.coef = "(thresh)|(ranef)", 
+          file = "regression_output6.html"
+          )
+```
+
+Tests
+
+```{r Perform a lead and lags}
+
+```
+
+```{r Citation}
+citation("fixest")
+```
+
+```{r Test for Heteroskedasticity}
+# Load the package
+library(lmtest)
+model_test1 <- lm(legitim_court_b  ~ future + ongoing + completed + age + gender + urban, data = ABreg1)
+
+# Perform the Breusch-Pagan test
+bptest(model_test1)
+```
+
+
+
+
+
+
+
+
