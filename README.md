@@ -13,10 +13,6 @@ This repository contains R scripts used for the data analysis. It includes:
 2. Install the required R packages: `foreign`, `readr`, `readxl`, `tidyverse`, `broom`, `stringr`, `dplyr`, `skimr`, `officer`, `flextable`, `sf`, `sjlabelled`, `ggplot2`, `fixest`, `texreg`, `rnaturalearth`, `rnaturalearthdata`, `countrycode`.
 4. Run `geospatial-development-projects.Rmd` for the main results.
 
-## Highlights
-- Modular, reusable code.
-- Example of geospatial regression modeling and data visualization in R.
-
 ## Dataset
 - This study utilised two main sources: Afrobarometer Survey Data from rounds 4-6
 (2008-2015), which includes approximately 74,000 respondents from 37 African
@@ -25,7 +21,12 @@ providing geo-coded data on project periods (AidData, 2017; BenYishay, 2017). A
 repeated cross-sectional dataset was created for this paper, focusing on 61,337
 respondents from 28 African countries and 701 World Bank projects between 2008
 and 2014.
-- The geospatial data used in this analysis cannot be shared here due to privacy concerns; however, it is available upon request on the official Afrobarometer [website]([url](https://www.afrobarometer.org/geocoded-data/)).
+- The geospatial data used in this analysis cannot be shared here due to privacy concerns; however, it is available upon request on the official Afrobarometer [website](https://www.afrobarometer.org/geocoded-data/).
+
+## Highlights
+- Modular, reusable code.
+- Example of geospatial regression modeling and data visualization in R.
+
 
 # Thematic project Description
 Foreign Aid and Institutional Quality in Africa: Evidence from Afrobarometer and World Bank Project Data
