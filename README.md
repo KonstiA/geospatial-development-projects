@@ -21,7 +21,7 @@ providing geo-coded data on project periods (AidData, 2017; BenYishay, 2017). A
 repeated cross-sectional dataset was created for this paper, focusing on 61,337
 respondents from 28 African countries and 701 World Bank projects between 2008
 and 2014.
-- The geospatial data used in this analysis cannot be shared here due to privacy concerns; however, it is available upon request on the official Afrobarometer [website](https://www.afrobarometer.org/geocoded-data/).
+- The geospatial data used in this analysis cannot be shared here due to privacy concerns; however, it is available upon request on the official [Afrobarometer website](https://www.afrobarometer.org/geocoded-data/).
 
 ## Highlights
 - Modular, reusable code.
